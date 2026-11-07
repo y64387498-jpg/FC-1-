@@ -1,0 +1,82 @@
+name: FC Mobile Hub APK Build
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  APP_NAME: FC-Mobile-Hub
+
+jobs:
+  build:
+    name: APK Derle
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Kodu indir
+        uses: actions/checkout@v4
+
+      - name: Java 17 kur
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Android SDK kur
+        uses: android-actions/setup-android@v3
+
+      - name: Gradle kur ve cache ayarla
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Gradle izni ver
+        run: chmod +x gradlew
+
+      - name: Bagimliliklari indir
+        run: ./gradlew dependencies --no-daemon
+
+      - name: Lint kontrolu
+        run: ./gradlew lintDebug --no-daemon
+        continue-on-error: true
+
+      - name: Debug APK derle
+        run: ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: APK dosyasini yeniden adlandir
+        run: |
+          mkdir -p output
+          cp app/build/outputs/apk/debug/*.apk output/${APP_NAME}-debug.apk
+          ls -lh output
+
+      - name: APK yukle (Artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.APP_NAME }}-APK
+          path: output/*.apk
+          retention-days: 30
+
+      - name: Lint raporunu yukle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-raporu
+          path: app/build/reports/lint-results-debug.html
+          if-no-files-found: ignore
+
+      - name: Release olustur
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: ${{ env.APP_NAME }} Build ${{ github.run_number }}
+          body: |
+            Otomatik derlenen APK.
+            Commit: ${{ github.sha }}
+          files: output/*.apk
+          prerelease: true
