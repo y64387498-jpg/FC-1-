@@ -1,82 +1,57 @@
-name: FC Mobile Hub APK Build
+name: Build FC Mobile Hub APK
 
 on:
+  workflow_dispatch:
   push:
     branches: [ main ]
-  pull_request:
-    branches: [ main ]
-  workflow_dispatch:
 
 permissions:
-  contents: write
-
-env:
-  APP_NAME: FC-Mobile-Hub
+  contents: read
 
 jobs:
   build:
-    name: APK Derle
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-
     steps:
-      - name: Kodu indir
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Java 17 kur
+      - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 17
+          java-version: '17'
 
-      - name: Android SDK kur
-        uses: android-actions/setup-android@v3
-
-      - name: Gradle kur ve cache ayarla
+      - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
 
-      - name: Gradle izni ver
-        run: chmod +x gradlew
-
-      - name: Bagimliliklari indir
-        run: ./gradlew dependencies --no-daemon
-
-      - name: Lint kontrolu
-        run: ./gradlew lintDebug --no-daemon
-        continue-on-error: true
-
-      - name: Debug APK derle
-        run: ./gradlew assembleDebug --no-daemon --stacktrace
-
-      - name: APK dosyasini yeniden adlandir
+      - name: Use preinstalled Android SDK
+        shell: bash
         run: |
-          mkdir -p output
-          cp app/build/outputs/apk/debug/*.apk output/${APP_NAME}-debug.apk
-          ls -lh output
+          echo "ANDROID_HOME=${ANDROID_HOME}"
+          echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT}"
+          test -d "${ANDROID_HOME}/platforms"
+          ls "${ANDROID_HOME}/platforms"
+          SDKMANAGER="$(find "${ANDROID_HOME}" -type f -name sdkmanager 2>/dev/null | head -n 1)"
+          if [ -n "$SDKMANAGER" ]; then
+            yes | "$SDKMANAGER" --licenses >/dev/null || true
+            "$SDKMANAGER" "platforms;android-35" "build-tools;35.0.0" || true
+          fi
 
-      - name: APK yukle (Artifact)
+      - name: Verify Android project
+        run: |
+          test -f settings.gradle
+          test -f build.gradle
+          test -f app/build.gradle
+          test -f app/src/main/AndroidManifest.xml
+
+      - name: Build debug APK
+        run: gradle assembleDebug --no-daemon --stacktrace
+
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.APP_NAME }}-APK
-          path: output/*.apk
-          retention-days: 30
-
-      - name: Lint raporunu yukle
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: lint-raporu
-          path: app/build/reports/lint-results-debug.html
-          if-no-files-found: ignore
-
-      - name: Release olustur
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: build-${{ github.run_number }}
-          name: ${{ env.APP_NAME }} Build ${{ github.run_number }}
-          body: |
-            Otomatik derlenen APK.
-            Commit: ${{ github.sha }}
-          files: output/*.apk
-          prerelease: true
+          name: FC-Mobile-Hub-APK
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
